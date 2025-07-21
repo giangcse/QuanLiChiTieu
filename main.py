@@ -21,55 +21,102 @@ from dotenv import load_dotenv
 import matplotlib.pyplot as plt
 import io
 
+# Thư viện cơ sở dữ liệu
+import sqlite3
+
 # --- CẤU HÌNH ---
-# Tải các biến môi trường từ file .env vào hệ thống
 load_dotenv()
-
-# Lấy token từ biến môi trường đã tải
 TOKEN = os.getenv('TELEGRAM_API_TOKEN')
-DATA_FILE = 'thu_chi_data.csv'
+DB_FILE = 'finance_bot.db' # Đổi sang file cơ sở dữ liệu SQLite
 
-# Bật logging để theo dõi và gỡ lỗi
+# Bật logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# --- BỘ PHẬN MÁY HỌC ---
+# --- QUẢN LÝ CƠ SỞ DỮ LIỆU ---
+
+def init_db():
+    """Khởi tạo cơ sở dữ liệu và tạo bảng nếu chưa tồn tại."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            date TEXT NOT NULL,
+            type TEXT NOT NULL,
+            amount REAL NOT NULL,
+            category TEXT,
+            description TEXT
+        )
+    ''')
+    conn.commit()
+    conn.close()
+    logger.info(f"Cơ sở dữ liệu '{DB_FILE}' đã được khởi tạo.")
+
+def save_transaction(user_id, date, amount, category, description, transaction_type):
+    """Lưu giao dịch vào cơ sở dữ liệu SQLite."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO transactions (user_id, date, type, amount, category, description) VALUES (?, ?, ?, ?, ?, ?)",
+        (user_id, date.strftime('%Y-%m-%d %H:%M:%S'), transaction_type, amount, category, description)
+    )
+    conn.commit()
+    conn.close()
+
+def fetch_data_from_db(user_id, period_type='all'):
+    """Lấy dữ liệu từ DB cho một người dùng và khoảng thời gian cụ thể."""
+    conn = sqlite3.connect(DB_FILE)
+    query = "SELECT date, type, amount, category, description FROM transactions WHERE user_id = ?"
+    
+    now = datetime.now()
+    params = [user_id]
+
+    if period_type == 'month':
+        start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        query += " AND date >= ?"
+        params.append(start_date.strftime('%Y-%m-%d %H:%M:%S'))
+    elif period_type == 'week':
+        start_of_week = now - pd.to_timedelta(now.weekday(), unit='d')
+        start_of_week = start_of_week.replace(hour=0, minute=0, second=0, microsecond=0)
+        query += " AND date >= ?"
+        params.append(start_of_week.strftime('%Y-%m-%d %H:%M:%S'))
+
+    df = pd.read_sql_query(query, conn, params=tuple(params))
+    conn.close()
+    
+    if not df.empty:
+        df['date'] = pd.to_datetime(df['date'])
+    return df
+
+
+# --- BỘ PHẬN MÁY HỌC (Không thay đổi) ---
 expense_model = None
 income_model = None
-
 def train_models():
-    """Huấn luyện đồng thời cả hai mô hình phân loại cho Thu và Chi."""
     global expense_model, income_model
     logger.info("Bắt đầu huấn luyện các mô hình với dữ liệu mở rộng...")
-    
-    # --- Dữ liệu huấn luyện cho CHI TIÊU (Mở rộng) ---
     expense_data = [
-        # Ăn uống
         ("cơm sườn trưa", "Ăn uống"), ("mua ly trà sữa", "Ăn uống"), ("cà phê với bạn", "Ăn uống"),
         ("ăn tối nhà hàng", "Ăn uống"), ("bún chả", "Ăn uống"), ("phở bò", "Ăn uống"),
         ("đi ăn lẩu", "Ăn uống"), ("mua đồ ăn vặt", "Ăn uống"), ("thanh toán ahamove", "Ăn uống"),
         ("trà đá", "Ăn uống"), ("đi chợ mua thức ăn", "Ăn uống"),
-        # Đi lại
         ("đổ xăng xe máy", "Đi lại"), ("vé xe bus tháng", "Đi lại"), ("tiền grab đi làm", "Đi lại"),
         ("gửi xe", "Đi lại"), ("tiền vé máy bay", "Đi lại"), ("phí cầu đường", "Đi lại"),
         ("bảo dưỡng xe", "Đi lại"), ("rửa xe", "Đi lại"),
-        # Mua sắm
         ("mua áo sơ mi", "Mua sắm"), ("đặt hàng shopee", "Mua sắm"), ("mua một đôi giày mới", "Mua sắm"),
         ("mua sách", "Mua sắm"), ("mua đồ gia dụng", "Mua sắm"), ("mua quà sinh nhật", "Mua sắm"),
         ("thanh toán tiki", "Mua sắm"), ("mua sắm lazada", "Mua sắm"),
-        # Hóa đơn
         ("thanh toán tiền điện", "Hóa đơn"), ("đóng tiền net FPT", "Hóa đơn"), ("tiền nhà tháng 8", "Hóa đơn"),
         ("tiền mạng viettel", "Hóa đơn"), ("phí chung cư", "Hóa đơn"), ("truyền hình cáp", "Hóa đơn"),
         ("nạp tiền điện thoại", "Hóa đơn"),
-        # Giải trí
         ("vé xem phim cgv", "Giải trí"), ("mua vé concert", "Giải trí"), ("đi bar", "Giải trí"),
         ("đăng ký gym", "Giải trí"), ("mua game trên steam", "Giải trí"),
-        # Sức khỏe
         ("mua thuốc cảm", "Sức khỏe"), ("tiền khám răng", "Sức khỏe"), ("mua vitamin", "Sức khỏe"),
         ("khám bệnh", "Sức khỏe"),
-        # Giáo dục
         ("học phí khóa học online", "Giáo dục"), ("mua tài liệu học", "Giáo dục"), ("đóng tiền học", "Giáo dục"),
     ]
     expense_descriptions = [item[0] for item in expense_data]
@@ -77,23 +124,16 @@ def train_models():
     expense_model = Pipeline([('tfidf', TfidfVectorizer()), ('clf', MultinomialNB())])
     expense_model.fit(expense_descriptions, expense_categories)
     logger.info("Huấn luyện mô hình CHI TIÊU thành công!")
-
-    # --- Dữ liệu huấn luyện cho THU NHẬP (Mở rộng) ---
     income_data = [
-        # Lương
         ("lương tháng 8", "Lương"), ("nhận lương công ty", "Lương"), ("lương tháng 7", "Lương"),
         ("lương part-time", "Lương"), ("nhận lương", "Lương"), ("ting ting lương về", "Lương"),
-        # Thưởng
         ("thưởng dự án", "Thưởng"), ("được sếp thưởng", "Thưởng"), ("thưởng lễ", "Thưởng"),
         ("thưởng cuối năm", "Thưởng"), ("bonus", "Thưởng"), ("nhận tiền thưởng", "Thưởng"),
-        # Thu nhập phụ
         ("tiền cho thuê xe", "Thu nhập phụ"), ("cho thuê nhà", "Thu nhập phụ"), ("bán đồ cũ online", "Thu nhập phụ"),
         ("tiền dạy thêm", "Thu nhập phụ"), ("làm freelancer", "Thu nhập phụ"), ("tiền cho thuê phòng", "Thu nhập phụ"),
         ("bán hàng online", "Thu nhập phụ"),
-        # Đầu tư
         ("lãi ngân hàng", "Đầu tư"), ("lợi nhuận chứng khoán", "Đầu tư"), ("tiền cổ tức", "Đầu tư"),
         ("lãi tiết kiệm", "Đầu tư"),
-        # Nguồn khác
         ("được cho tiền", "Khác"), ("quà mừng cưới", "Khác"), ("nhận tiền hoàn thuế", "Khác"),
         ("bố mẹ cho", "Khác"),
     ]
@@ -104,17 +144,15 @@ def train_models():
     logger.info("Huấn luyện mô hình THU NHẬP thành công!")
 
 def classify_transaction(description: str, transaction_type: str) -> str:
-    """Phân loại giao dịch dựa trên loại (thu/chi) bằng mô hình ML."""
     if transaction_type == 'chi' and expense_model:
         return expense_model.predict([description])[0]
     elif transaction_type == 'thu' and income_model:
         return income_model.predict([description])[0]
     return "Khác"
 
-# --- CÁC HÀM XỬ LÝ LỆNH ---
+# --- CÁC HÀM XỬ LÝ LỆNH (Đã cập nhật để dùng DB) ---
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Gửi tin nhắn chào mừng khi người dùng gõ /start."""
     user = update.effective_user
     await update.message.reply_html(
         f"Xin chào {user.mention_html()}!\n\n"
@@ -127,10 +165,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Hiển thị thông tin trợ giúp và các lệnh có sẵn."""
     await update.message.reply_text(
         "💡 **Các lệnh bạn có thể dùng:**\n\n"
-        "/start - Bắt đầu và xem hướng dẫn\n"
+        "/start - Bắt đầu\n"
         "/help - Xem lại tin nhắn này\n"
         "/tuan - Thống kê Thu-Chi tuần này\n"
         "/thang - Thống kê Thu-Chi tháng này\n"
@@ -138,7 +175,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
 async def handle_transaction_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Xử lý tin nhắn giao dịch một cách linh hoạt."""
     text = update.message.text.lower()
     user_id = update.message.from_user.id
     numbers = re.findall(r'\d+', text)
@@ -172,99 +208,47 @@ async def handle_transaction_message(update: Update, context: ContextTypes.DEFAU
     )
 
 async def weekly_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Thống kê thu chi trong tuần hiện tại."""
     now = datetime.now()
     await generate_full_report(update, context, "week", f"Tuần {now.isocalendar().week}, {now.year}")
 
 async def monthly_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Thống kê thu chi trong tháng hiện tại."""
     now = datetime.now()
     await generate_full_report(update, context, "month", f"Tháng {now.month}/{now.year}")
 
 async def thongke_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Tạo và gửi biểu đồ thống kê chi tiêu tháng hiện tại."""
     user_id = update.message.from_user.id
     now = datetime.now()
     
-    try:
-        df = pd.read_csv(DATA_FILE)
-        df['date'] = pd.to_datetime(df['date'])
-    except FileNotFoundError:
-        await update.message.reply_text('Bạn chưa có dữ liệu nào để thống kê.')
-        return
-
-    # Lọc dữ liệu chi tiêu của người dùng trong tháng hiện tại
-    expense_df = df[
-        (df['user_id'] == user_id) &
-        (df['type'] == 'chi') &
-        (df['date'].dt.month == now.month) &
-        (df['date'].dt.year == now.year)
-    ]
+    user_df = fetch_data_from_db(user_id, 'month')
+    expense_df = user_df[user_df['type'] == 'chi']
 
     if expense_df.empty:
         await update.message.reply_text('Bạn không có chi tiêu nào trong tháng này để vẽ biểu đồ.')
         return
 
-    # Nhóm theo danh mục và tính tổng
     category_stats = expense_df.groupby('category')['amount'].sum()
-
-    # Vẽ biểu đồ
     plt.style.use('seaborn-v0_8-pastel')
     fig, ax = plt.subplots(figsize=(8, 8), subplot_kw=dict(aspect="equal"))
-
     labels = category_stats.index
     sizes = category_stats.values
-
     wedges, texts, autotexts = ax.pie(sizes, autopct='%1.1f%%', startangle=90, textprops=dict(color="w"))
-    
-    ax.legend(wedges, labels,
-              title="Danh mục",
-              loc="center left",
-              bbox_to_anchor=(1, 0, 0.5, 1))
-              
+    ax.legend(wedges, labels, title="Danh mục", loc="center left", bbox_to_anchor=(1, 0, 0.5, 1))
     plt.setp(autotexts, size=8, weight="bold")
     ax.set_title(f"Biểu đồ Chi tiêu Tháng {now.month}/{now.year}")
-
-    # Lưu biểu đồ vào một buffer trong bộ nhớ
     buf = io.BytesIO()
     plt.savefig(buf, format='png', bbox_inches='tight')
     plt.close(fig)
     buf.seek(0)
-
-    # Gửi ảnh cho người dùng
     await update.message.reply_photo(photo=buf, caption="Đây là biểu đồ phân tích chi tiêu tháng này của bạn.")
 
-
-# --- CÁC HÀM TIỆN ÍCH ---
-
-def save_transaction(user_id, date, amount, category, description, transaction_type):
-    """Lưu giao dịch (thu hoặc chi) vào file CSV."""
-    try:
-        df = pd.read_csv(DATA_FILE)
-    except FileNotFoundError:
-        df = pd.DataFrame(columns=['user_id', 'date', 'type', 'amount', 'category', 'description'])
-    new_row = pd.DataFrame([{'user_id': user_id, 'date': date.strftime('%Y-%m-%d %H:%M:%S'), 'type': transaction_type, 'amount': amount, 'category': category, 'description': description}])
-    df = pd.concat([df, new_row], ignore_index=True)
-    df.to_csv(DATA_FILE, index=False)
-
 async def generate_full_report(update: Update, context: ContextTypes.DEFAULT_TYPE, period_type: str, period_name: str):
-    """Tạo và gửi báo cáo Thu-Chi tổng hợp cho một khoảng thời gian."""
     user_id = update.message.from_user.id
-    try:
-        df = pd.read_csv(DATA_FILE)
-        df['date'] = pd.to_datetime(df['date'])
-    except FileNotFoundError:
-        await update.message.reply_text('Bạn chưa có dữ liệu nào để thống kê.')
-        return
-    now = datetime.now()
-    if period_type == "week":
-        period_filter = (df['date'].dt.isocalendar().week == now.isocalendar().week) & (df['date'].dt.year == now.year)
-    else:
-        period_filter = (df['date'].dt.month == now.month) & (df['date'].dt.year == now.year)
-    user_df = df[(df['user_id'] == user_id) & period_filter]
+    user_df = fetch_data_from_db(user_id, period_type)
+
     if user_df.empty:
         await update.message.reply_text(f'Bạn không có giao dịch nào trong {period_name.lower()}.')
         return
+        
     income_df = user_df[user_df['type'] == 'thu']
     expense_df = user_df[user_df['type'] == 'chi']
     total_income = income_df['amount'].sum()
@@ -295,7 +279,10 @@ def main() -> None:
     if not TOKEN:
         logger.error("LỖI: Không tìm thấy TELEGRAM_API_TOKEN trong file .env")
         return
+    
+    init_db() # Khởi tạo DB khi bot bắt đầu
     train_models()
+    
     application = Application.builder().token(TOKEN).build()
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
@@ -303,7 +290,8 @@ def main() -> None:
     application.add_handler(CommandHandler("thang", monthly_stats_command))
     application.add_handler(CommandHandler("thongke", thongke_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_transaction_message))
-    print("Bot Quản lý Thu-Chi (phiên bản vẽ biểu đồ) đang chạy...")
+    
+    print("Bot Quản lý Thu-Chi (phiên bản SQLite) đang chạy...")
     application.run_polling()
     print("Bot đã dừng.")
 
