@@ -42,24 +42,60 @@ income_model = None
 def train_models():
     """Huấn luyện đồng thời cả hai mô hình phân loại cho Thu và Chi."""
     global expense_model, income_model
-    logger.info("Bắt đầu huấn luyện các mô hình...")
+    logger.info("Bắt đầu huấn luyện các mô hình với dữ liệu mở rộng...")
+    
+    # --- Dữ liệu huấn luyện cho CHI TIÊU (Mở rộng) ---
     expense_data = [
+        # Ăn uống
         ("cơm sườn trưa", "Ăn uống"), ("mua ly trà sữa", "Ăn uống"), ("cà phê với bạn", "Ăn uống"),
+        ("ăn tối nhà hàng", "Ăn uống"), ("bún chả", "Ăn uống"), ("phở bò", "Ăn uống"),
+        ("đi ăn lẩu", "Ăn uống"), ("mua đồ ăn vặt", "Ăn uống"), ("thanh toán ahamove", "Ăn uống"),
+        ("trà đá", "Ăn uống"), ("đi chợ mua thức ăn", "Ăn uống"),
+        # Đi lại
         ("đổ xăng xe máy", "Đi lại"), ("vé xe bus tháng", "Đi lại"), ("tiền grab đi làm", "Đi lại"),
+        ("gửi xe", "Đi lại"), ("tiền vé máy bay", "Đi lại"), ("phí cầu đường", "Đi lại"),
+        ("bảo dưỡng xe", "Đi lại"), ("rửa xe", "Đi lại"),
+        # Mua sắm
         ("mua áo sơ mi", "Mua sắm"), ("đặt hàng shopee", "Mua sắm"), ("mua một đôi giày mới", "Mua sắm"),
+        ("mua sách", "Mua sắm"), ("mua đồ gia dụng", "Mua sắm"), ("mua quà sinh nhật", "Mua sắm"),
+        ("thanh toán tiki", "Mua sắm"), ("mua sắm lazada", "Mua sắm"),
+        # Hóa đơn
         ("thanh toán tiền điện", "Hóa đơn"), ("đóng tiền net FPT", "Hóa đơn"), ("tiền nhà tháng 8", "Hóa đơn"),
-        ("vé xem phim cgv", "Giải trí"), ("mua thuốc cảm", "Sức khỏe"),
+        ("tiền mạng viettel", "Hóa đơn"), ("phí chung cư", "Hóa đơn"), ("truyền hình cáp", "Hóa đơn"),
+        ("nạp tiền điện thoại", "Hóa đơn"),
+        # Giải trí
+        ("vé xem phim cgv", "Giải trí"), ("mua vé concert", "Giải trí"), ("đi bar", "Giải trí"),
+        ("đăng ký gym", "Giải trí"), ("mua game trên steam", "Giải trí"),
+        # Sức khỏe
+        ("mua thuốc cảm", "Sức khỏe"), ("tiền khám răng", "Sức khỏe"), ("mua vitamin", "Sức khỏe"),
+        ("khám bệnh", "Sức khỏe"),
+        # Giáo dục
+        ("học phí khóa học online", "Giáo dục"), ("mua tài liệu học", "Giáo dục"), ("đóng tiền học", "Giáo dục"),
     ]
     expense_descriptions = [item[0] for item in expense_data]
     expense_categories = [item[1] for item in expense_data]
     expense_model = Pipeline([('tfidf', TfidfVectorizer()), ('clf', MultinomialNB())])
     expense_model.fit(expense_descriptions, expense_categories)
     logger.info("Huấn luyện mô hình CHI TIÊU thành công!")
+
+    # --- Dữ liệu huấn luyện cho THU NHẬP (Mở rộng) ---
     income_data = [
-        ("lương tháng 8", "Lương"), ("nhận lương công ty", "Lương"),
-        ("thưởng dự án", "Thưởng"), ("được sếp thưởng", "Thưởng"),
-        ("tiền cho thuê xe", "Thu nhập phụ"), ("cho thuê nhà", "Thu nhập phụ"),
-        ("bán đồ cũ online", "Thu nhập phụ"), ("lãi ngân hàng", "Đầu tư"),
+        # Lương
+        ("lương tháng 8", "Lương"), ("nhận lương công ty", "Lương"), ("lương tháng 7", "Lương"),
+        ("lương part-time", "Lương"), ("nhận lương", "Lương"), ("ting ting lương về", "Lương"),
+        # Thưởng
+        ("thưởng dự án", "Thưởng"), ("được sếp thưởng", "Thưởng"), ("thưởng lễ", "Thưởng"),
+        ("thưởng cuối năm", "Thưởng"), ("bonus", "Thưởng"), ("nhận tiền thưởng", "Thưởng"),
+        # Thu nhập phụ
+        ("tiền cho thuê xe", "Thu nhập phụ"), ("cho thuê nhà", "Thu nhập phụ"), ("bán đồ cũ online", "Thu nhập phụ"),
+        ("tiền dạy thêm", "Thu nhập phụ"), ("làm freelancer", "Thu nhập phụ"), ("tiền cho thuê phòng", "Thu nhập phụ"),
+        ("bán hàng online", "Thu nhập phụ"),
+        # Đầu tư
+        ("lãi ngân hàng", "Đầu tư"), ("lợi nhuận chứng khoán", "Đầu tư"), ("tiền cổ tức", "Đầu tư"),
+        ("lãi tiết kiệm", "Đầu tư"),
+        # Nguồn khác
+        ("được cho tiền", "Khác"), ("quà mừng cưới", "Khác"), ("nhận tiền hoàn thuế", "Khác"),
+        ("bố mẹ cho", "Khác"),
     ]
     income_descriptions = [item[0] for item in income_data]
     income_categories = [item[1] for item in income_data]
@@ -115,7 +151,7 @@ async def handle_transaction_message(update: Update, context: ContextTypes.DEFAU
         description_full = re.sub(r'\b' + num_str + r'\b', '', description_full).strip()
     transaction_type = 'chi'
     icon = '💸'
-    if any(keyword in description_full.split() for keyword in ['thu', '+']):
+    if any(keyword in description_full.split() for keyword in ['thu', '+', 'nhận', 'lương', 'thưởng', 'bonus', 'lãi']):
         transaction_type = 'thu'
         icon = '💰'
     keywords_to_remove = ['thu', 'chi', '+', '-']
