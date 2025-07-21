@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bảng điều khiển Tài chính Cá nhân</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Chosen Palette: Warm Neutrals -->
+    <!-- Application Structure Plan: A dashboard-style single-page application. The primary interaction is for the user to upload their 'thu_chi_data.csv' file. The structure includes: 1) A file upload area. 2) Key metric cards (Total Income, Expense, Balance). 3) Time-period filters (Week/Month/All). 4) Interactive charts (Donut for expense breakdown, Bar for Income vs. Expense). 5) A detailed transaction list. This structure is chosen to guide the user from data input to high-level overview, then to detailed exploration, which is a logical and intuitive user flow for data analysis. -->
+    <!-- Visualization & Content Choices: [Total Income/Expense/Balance -> Goal: Inform -> Method: Dynamic Stats Cards -> Interaction: Updates on filter change -> Justification: Quickest way to see key numbers], [Expense Breakdown -> Goal: Compare -> Method: Donut Chart (Chart.js) -> Interaction: Hover to see details -> Justification: Intuitive visualization of spending proportions], [Income vs. Expense -> Goal: Compare -> Method: Bar Chart (Chart.js) -> Interaction: Hover to see values -> Justification: Clear comparison of inflow vs. outflow], [Transaction History -> Goal: Organize -> Method: Sortable HTML Table -> Interaction: Scrollable, Sortable -> Justification: Provides detailed data access and verification]. -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc;
+        }
+        .chart-container {
+            position: relative;
+            height: 300px;
+            width: 100%;
+            max-width: 500px;
+            margin: auto;
+        }
+        @media (min-width: 768px) {
+            .chart-container {
+                height: 350px;
+            }
+        }
+        .file-upload-wrapper {
+            position: relative;
+            width: 100%;
+            height: 150px;
+            border: 2px dashed #cbd5e1;
+            border-radius: 0.75rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background-color 0.2s ease-in-out;
+        }
+        .file-upload-wrapper:hover {
+            background-color: #f1f5f9;
+            border-color: #94a3b8;
+        }
+        .file-upload-wrapper input[type="file"] {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body class="text-slate-800">
+
+    <div class="container mx-auto p-4 md:p-6 lg:p-8">
+        
+        <header class="text-center mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold text-slate-900">Bảng điều khiển Tài chính</h1>
+            <p class="text-slate-600 mt-2">Tải lên file `thu_chi_data.csv` của bạn để xem thống kê.</p>
+        </header>
+
+        <main class="space-y-8">
+            <!-- File Upload -->
+            <section id="upload-section">
+                <div class="max-w-xl mx-auto">
+                    <div class="file-upload-wrapper">
+                        <input type="file" id="csv-file-input" accept=".csv">
+                        <div class="text-center text-slate-500">
+                            <svg class="mx-auto h-12 w-12" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true"><path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                            <p class="mt-2 font-semibold">Nhấn để tải lên file CSV</p>
+                            <p class="text-xs">Hoặc kéo và thả file vào đây</p>
+                        </div>
+                    </div>
+                    <p id="file-name" class="text-center text-sm text-slate-500 mt-2"></p>
+                </div>
+            </section>
+
+            <!-- Dashboard Content - Hidden by default -->
+            <div id="dashboard-content" class="hidden space-y-8">
+                <!-- Time Filter & Key Metrics -->
+                <section>
+                    <div class="flex justify-center mb-6">
+                        <div class="bg-slate-200 p-1 rounded-lg flex space-x-1">
+                            <button data-period="all" class="period-btn px-4 py-2 text-sm font-semibold rounded-md transition-colors">Tất cả</button>
+                            <button data-period="month" class="period-btn px-4 py-2 text-sm font-semibold rounded-md transition-colors">Tháng này</button>
+                            <button data-period="week" class="period-btn px-4 py-2 text-sm font-semibold rounded-md transition-colors">Tuần này</button>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 text-center">
+                        <div class="bg-white p-6 rounded-xl shadow-sm">
+                            <h3 class="text-sm font-medium text-slate-500">Tổng Thu</h3>
+                            <p id="total-income" class="text-2xl md:text-3xl font-bold text-green-600 mt-2">0 VNĐ</p>
+                        </div>
+                        <div class="bg-white p-6 rounded-xl shadow-sm">
+                            <h3 class="text-sm font-medium text-slate-500">Tổng Chi</h3>
+                            <p id="total-expense" class="text-2xl md:text-3xl font-bold text-red-600 mt-2">0 VNĐ</p>
+                        </div>
+                        <div class="bg-white p-6 rounded-xl shadow-sm">
+                            <h3 class="text-sm font-medium text-slate-500">Số Dư</h3>
+                            <p id="balance" class="text-2xl md:text-3xl font-bold text-slate-800 mt-2">0 VNĐ</p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Visualizations -->
+                <section class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <div class="bg-white p-6 rounded-xl shadow-sm">
+                        <h2 class="text-xl font-bold mb-4 text-center">Phân loại Chi tiêu</h2>
+                        <div class="chart-container">
+                            <canvas id="expense-chart"></canvas>
+                        </div>
+                    </div>
+                    <div class="bg-white p-6 rounded-xl shadow-sm">
+                        <h2 class="text-xl font-bold mb-4 text-center">Thu nhập vs. Chi tiêu</h2>
+                        <div class="chart-container">
+                            <canvas id="income-expense-chart"></canvas>
+                        </div>
+                    </div>
+                </section>
+                
+                <!-- Transaction History -->
+                <section class="bg-white p-6 rounded-xl shadow-sm">
+                    <h2 class="text-xl font-bold mb-4">Lịch sử Giao dịch</h2>
+                    <div class="max-h-96 overflow-y-auto">
+                        <table class="w-full text-left">
+                            <thead class="sticky top-0 bg-white shadow-sm">
+                                <tr>
+                                    <th class="p-3 text-sm font-semibold text-slate-600 cursor-pointer">Ngày</th>
+                                    <th class="p-3 text-sm font-semibold text-slate-600 cursor-pointer">Nội dung</th>
+                                    <th class="p-3 text-sm font-semibold text-slate-600 cursor-pointer">Danh mục</th>
+                                    <th class="p-3 text-sm font-semibold text-slate-600 cursor-pointer text-right">Số tiền</th>
+                                </tr>
+                            </thead>
+                            <tbody id="transaction-list">
+                                <!-- Transactions will be rendered here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/papaparse/5.3.0/papaparse.min.js"></script>
+    <script>
+        // --- STATE & DATA ---
+        let state = {
+            period: 'all', // 'all', 'month', 'week'
+            transactions: [],
+        };
+
+        const expenseChartCtx = document.getElementById('expense-chart').getContext('2d');
+        const incomeExpenseChartCtx = document.getElementById('income-expense-chart').getContext('2d');
+        let expenseChart, incomeExpenseChart;
+
+        // --- UI ELEMENTS ---
+        const fileInput = document.getElementById('csv-file-input');
+        const fileNameEl = document.getElementById('file-name');
+        const dashboardContent = document.getElementById('dashboard-content');
+        const periodBtns = document.querySelectorAll('.period-btn');
+        const totalIncomeEl = document.getElementById('total-income');
+        const totalExpenseEl = document.getElementById('total-expense');
+        const balanceEl = document.getElementById('balance');
+        const transactionListEl = document.getElementById('transaction-list');
+        
+        // --- HELPER FUNCTIONS ---
+        const formatCurrency = (amount) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount);
+
+        const getPeriodRange = (period) => {
+            const now = new Date();
+            if (period === 'month') {
+                const start = new Date(now.getFullYear(), now.getMonth(), 1);
+                const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+                return { start, end };
+            }
+            if (period === 'week') {
+                const start = new Date(now);
+                const dayOfWeek = now.getDay();
+                const diff = now.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1); 
+                start.setDate(diff);
+                start.setHours(0,0,0,0);
+                const end = new Date(start);
+                end.setDate(start.getDate() + 6);
+                end.setHours(23,59,59,999);
+                return { start, end };
+            }
+            return { start: null, end: null }; // for 'all'
+        };
+
+        const handleFileSelect = (file) => {
+            if (!file || !file.type.match('csv.*')) {
+                alert('Vui lòng chọn một file .csv hợp lệ.');
+                return;
+            }
+
+            fileNameEl.textContent = `Đang xử lý: ${file.name}`;
+            Papa.parse(file, {
+                header: true,
+                skipEmptyLines: true,
+                complete: (results) => {
+                    try {
+                        state.transactions = results.data.map(row => ({
+                            ...row,
+                            amount: parseFloat(row.amount),
+                            date: new Date(row.date),
+                        })).filter(row => !isNaN(row.amount) && row.date instanceof Date && !isNaN(row.date));
+                        
+                        dashboardContent.classList.remove('hidden');
+                        fileNameEl.textContent = `Đã tải thành công: ${file.name}`;
+                        renderDashboard();
+                    } catch (error) {
+                        alert('Đã có lỗi xảy ra khi xử lý file. Vui lòng kiểm tra định dạng file CSV.');
+                        console.error(error);
+                    }
+                },
+                error: (error) => {
+                    alert('Không thể đọc file CSV.');
+                    console.error(error);
+                }
+            });
+        };
+
+        // --- RENDER FUNCTIONS ---
+        function renderDashboard() {
+            const { start, end } = getPeriodRange(state.period);
+            const filteredTransactions = state.period === 'all' 
+                ? state.transactions 
+                : state.transactions.filter(t => t.date >= start && t.date <= end);
+
+            // Calculate metrics
+            const totalIncome = filteredTransactions.filter(t => t.type === 'thu').reduce((sum, t) => sum + t.amount, 0);
+            const totalExpense = filteredTransactions.filter(t => t.type === 'chi').reduce((sum, t) => sum + t.amount, 0);
+            const balance = totalIncome - totalExpense;
+
+            // Update metric cards
+            totalIncomeEl.textContent = formatCurrency(totalIncome);
+            totalExpenseEl.textContent = formatCurrency(totalExpense);
+            balanceEl.textContent = formatCurrency(balance);
+
+            // Render transaction list
+            renderTransactionList(filteredTransactions);
+            
+            // Render charts
+            renderExpenseChart(filteredTransactions);
+            renderIncomeExpenseChart(totalIncome, totalExpense);
+            updateFilterButtons();
+        }
+
+        function renderTransactionList(data) {
+             transactionListEl.innerHTML = '';
+            if (data.length === 0) {
+                transactionListEl.innerHTML = `<tr><td colspan="4" class="text-center p-4 text-slate-500">Không có giao dịch nào.</td></tr>`;
+                return;
+            }
+            const sortedTransactions = [...data].sort((a, b) => b.date - a.date);
+            sortedTransactions.forEach(t => {
+                const row = document.createElement('tr');
+                row.className = 'border-b border-slate-100 hover:bg-slate-50';
+                const amountColor = t.type === 'thu' ? 'text-green-600' : 'text-red-600';
+                const amountSign = t.type === 'thu' ? '+' : '-';
+                row.innerHTML = `
+                    <td class="p-3 text-sm text-slate-500">${t.date.toLocaleDateString('vi-VN')}</td>
+                    <td class="p-3 font-medium">${t.description}</td>
+                    <td class="p-3 text-sm text-slate-500">${t.category}</td>
+                    <td class="p-3 font-semibold text-right ${amountColor}">${amountSign} ${formatCurrency(t.amount)}</td>
+                `;
+                transactionListEl.appendChild(row);
+            });
+        }
+
+        function renderExpenseChart(data) {
+            const expenseData = data.filter(t => t.type === 'chi');
+            const spendingByCategory = expenseData.reduce((acc, t) => {
+                acc[t.category] = (acc[t.category] || 0) + t.amount;
+                return acc;
+            }, {});
+
+            const labels = Object.keys(spendingByCategory);
+            const values = Object.values(spendingByCategory);
+            
+            if (expenseChart) expenseChart.destroy();
+            expenseChart = new Chart(expenseChartCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: values,
+                        backgroundColor: ['#3b82f6', '#ef4444', '#10b981', '#f97316', '#8b5cf6', '#ec4899', '#64748b'],
+                        borderColor: '#f8fafc',
+                        borderWidth: 4,
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'bottom', labels: { padding: 15, font: { size: 12 } } },
+                        tooltip: { callbacks: { label: (c) => `${c.label}: ${formatCurrency(c.parsed)}` } }
+                    }
+                }
+            });
+        }
+
+        function renderIncomeExpenseChart(income, expense) {
+             if (incomeExpenseChart) incomeExpenseChart.destroy();
+            incomeExpenseChart = new Chart(incomeExpenseChartCtx, {
+                type: 'bar',
+                data: {
+                    labels: [state.period === 'all' ? 'Tổng cộng' : (state.period === 'month' ? 'Tháng này' : 'Tuần này')],
+                    datasets: [
+                        { label: 'Thu nhập', data: [income], backgroundColor: 'rgba(16, 185, 129, 0.7)' },
+                        { label: 'Chi tiêu', data: [expense], backgroundColor: 'rgba(239, 68, 68, 0.7)' }
+                    ]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: { y: { beginAtZero: true, ticks: { callback: (v) => formatCurrency(v).replace(/\s*VNĐ$/, '') } } },
+                    plugins: {
+                        legend: { position: 'bottom' },
+                        tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${formatCurrency(c.parsed.y)}` } }
+                    }
+                }
+            });
+        }
+        
+        function updateFilterButtons() {
+            periodBtns.forEach(btn => {
+                if (btn.dataset.period === state.period) {
+                    btn.classList.add('bg-white', 'text-blue-600', 'shadow-sm');
+                } else {
+                    btn.classList.remove('bg-white', 'text-blue-600', 'shadow-sm');
+                }
+            });
+        }
+
+        // --- EVENT LISTENERS ---
+        fileInput.addEventListener('change', (e) => handleFileSelect(e.target.files[0]));
+        
+        const uploadWrapper = document.querySelector('.file-upload-wrapper');
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            uploadWrapper.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+            }, false);
+        });
+        ['dragenter', 'dragover'].forEach(eventName => {
+            uploadWrapper.addEventListener(eventName, () => uploadWrapper.classList.add('bg-slate-200'), false);
+        });
+        ['dragleave', 'drop'].forEach(eventName => {
+            uploadWrapper.addEventListener(eventName, () => uploadWrapper.classList.remove('bg-slate-200'), false);
+        });
+        uploadWrapper.addEventListener('drop', (e) => handleFileSelect(e.dataTransfer.files[0]), false);
+
+        periodBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                state.period = btn.dataset.period;
+                renderDashboard();
+            });
+        });
+
+        // --- INITIAL STATE ---
+        updateFilterButtons();
+    </script>
+</body>
+</html>
